@@ -1,6 +1,7 @@
 import numpy as np
 import plotly.graph_objects as go
 from calculator_engine import ConcreteSection
+from routing_engine import RouteEstimate
 
 
 def render_shape_preview(
@@ -315,3 +316,74 @@ def _add_3d_trace(fig: go.Figure, s: ConcreteSection):
                     showlegend=False,
                 )
             )
+
+
+def render_route_map(route: RouteEstimate) -> go.Figure:
+    """Renders an interactive mobile-friendly route map from the assigned plant to the jobsite."""
+    fig = go.Figure()
+
+    if route.route_coords:
+        lats = [pt[0] for pt in route.route_coords]
+        lons = [pt[1] for pt in route.route_coords]
+        fig.add_trace(
+            go.Scattermap(
+                lat=lats,
+                lon=lons,
+                mode="lines",
+                line=dict(width=4, color="#2563eb"),
+                name="Est. Dispatch Route",
+                hoverinfo="skip",
+            )
+        )
+
+    # Batch Plant Pin
+    fig.add_trace(
+        go.Scattermap(
+            lat=[route.plant_lat],
+            lon=[route.plant_lon],
+            mode="markers+text",
+            marker=dict(size=14, color="#16a34a"),
+            text=[route.plant_number],
+            textposition="top center",
+            name=f"{route.plant_number} ({route.plant_name})",
+            hovertemplate=f"<b>{route.plant_number}</b><br>{route.plant_name}<br>{route.plant_address}<extra></extra>",
+        )
+    )
+
+    # Customer Jobsite Pin
+    fig.add_trace(
+        go.Scattermap(
+            lat=[route.customer_lat],
+            lon=[route.customer_lon],
+            mode="markers+text",
+            marker=dict(size=14, color="#dc2626"),
+            text=["Jobsite"],
+            textposition="top center",
+            name="Delivery Jobsite",
+            hovertemplate=f"<b>Delivery Jobsite</b><br>{route.customer_formatted_address}<extra></extra>",
+        )
+    )
+
+    center_lat = (route.plant_lat + route.customer_lat) / 2.0
+    center_lon = (route.plant_lon + route.customer_lon) / 2.0
+
+    if route.distance_miles < 5:
+        zoom_lvl = 11.5
+    elif route.distance_miles < 15:
+        zoom_lvl = 10.2
+    elif route.distance_miles < 35:
+        zoom_lvl = 9.0
+    else:
+        zoom_lvl = 7.8
+
+    fig.update_layout(
+        map=dict(
+            style="open-street-map",
+            center=dict(lat=center_lat, lon=center_lon),
+            zoom=zoom_lvl,
+        ),
+        height=300,
+        margin=dict(l=0, r=0, t=0, b=0),
+        showlegend=False,
+    )
+    return fig

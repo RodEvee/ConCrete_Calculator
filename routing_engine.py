@@ -1,6 +1,7 @@
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
+from urllib.parse import quote_plus
 import requests
 import streamlit as st
 from geopy.geocoders import ArcGIS
@@ -62,10 +63,21 @@ class RouteEstimate:
     plant_number: str
     plant_name: str
     plant_address: str
+    plant_lat: float
+    plant_lon: float
     customer_formatted_address: str
+    customer_lat: float
+    customer_lon: float
     distance_miles: float
     duration_minutes: int
     is_live_road_route: bool
+    route_coords: List[Tuple[float, float]] = field(default_factory=list)  # (lat, lon) pairs
+
+    @property
+    def google_maps_url(self) -> str:
+        origin = quote_plus(self.plant_address)
+        dest = quote_plus(self.customer_formatted_address)
+        return f"https://www.google.com/maps/dir/?api=1&origin={origin}&destination={dest}&travelmode=driving"
 
 
 @st.cache_data(show_spinner=False)
@@ -81,7 +93,6 @@ def _get_geocoded_plants() -> List[dict]:
 
 
 def _haversine_miles(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Computes great-circle distance in miles between two lat/lon pairs."""
     r_miles = 3958.8
     phi1, phi2 = math.radians(lat1), math.radians(lat2)
     dphi = math.radians(lat2 - lat1)
@@ -95,31 +106,30 @@ def _haversine_miles(lat1: float, lon1: float, lat2: float, lon2: float) -> floa
 
 def _query_osrm_drive(
     origin_lon: float, origin_lat: float, dest_lon: float, dest_lat: float
-) -> Optional[Tuple[float, int]]:
-    """Queries public OSRM server for driving distance (miles) and duration (minutes)."""
+) -> Optional[Tuple[float, int, List[Tuple[float, float]]]]:
+    """Queries public OSRM server for driving miles, minutes, and full GeoJSON path."""
     url = (
         f"https://router.project-osrm.org/route/v1/driving/"
-        f"{origin_lon},{origin_lat};{dest_lon},{dest_lat}?overview=false"
+        f"{origin_lon},{origin_lat};{dest_lon},{dest_lat}?overview=full&geometries=geojson"
     )
     try:
-        resp = requests.get(url, timeout=4.5)
+        resp = requests.get(url, timeout=5.0)
         if resp.status_code == 200:
             data = resp.json()
             if data.get("code") == "Ok" and data.get("routes"):
                 route = data["routes"][0]
                 miles = route["distance"] / 1609.344
                 minutes = max(1, round(route["duration"] / 60.0))
-                return round(miles, 1), minutes
+                # GeoJSON returns [lon, lat]; flip to (lat, lon) for mapping
+                raw_coords = route.get("geometry", {}).get("coordinates", [])
+                lat_lon_path = [(lat, lon) for lon, lat in raw_coords]
+                return round(miles, 1), minutes, lat_lon_path
     except Exception:
         pass
     return None
 
 
 def find_nearest_plant(customer_address: str) -> RouteEstimate:
-    """
-    Geocodes the customer jobsite address, identifies the closest batch plant,
-    and returns driving distance and estimated travel time.
-    """
     cleaned = customer_address.strip()
     if not cleaned:
         raise ValueError("Please enter a valid street address, city, and state or ZIP code.")
@@ -133,29 +143,31 @@ def find_nearest_plant(customer_address: str) -> RouteEstimate:
 
     cust_lat, cust_lon = location.latitude, location.longitude
 
-    # Rank plants by straight-line distance first
     ranked = sorted(
         _get_geocoded_plants(),
         key=lambda p: _haversine_miles(p["lat"], p["lon"], cust_lat, cust_lon),
     )
 
-    # Check top 2 closest plants via live road routing to pick the true shortest drive
     best_route: Optional[RouteEstimate] = None
     for plant in ranked[:2]:
         osrm_res = _query_osrm_drive(plant["lon"], plant["lat"], cust_lon, cust_lat)
         if osrm_res is not None:
-            miles, mins = osrm_res
+            miles, mins, path_coords = osrm_res
             candidate = RouteEstimate(
                 plant_number=plant["plant_number"],
                 plant_name=plant["name"],
                 plant_address=plant["address"],
+                plant_lat=plant["lat"],
+                plant_lon=plant["lon"],
                 customer_formatted_address=location.address,
+                customer_lat=cust_lat,
+                customer_lon=cust_lon,
                 distance_miles=miles,
                 duration_minutes=mins,
                 is_live_road_route=True,
+                route_coords=path_coords,
             )
         else:
-            # Road-factor fallback (1.28x straight-line miles @ ~32 mph mixer truck avg)
             straight_miles = _haversine_miles(plant["lat"], plant["lon"], cust_lat, cust_lon)
             est_miles = round(straight_miles * 1.28, 1)
             est_mins = max(5, round((est_miles / 32.0) * 60.0))
@@ -163,10 +175,15 @@ def find_nearest_plant(customer_address: str) -> RouteEstimate:
                 plant_number=plant["plant_number"],
                 plant_name=plant["name"],
                 plant_address=plant["address"],
+                plant_lat=plant["lat"],
+                plant_lon=plant["lon"],
                 customer_formatted_address=location.address,
+                customer_lat=cust_lat,
+                customer_lon=cust_lon,
                 distance_miles=est_miles,
                 duration_minutes=est_mins,
                 is_live_road_route=False,
+                route_coords=[(plant["lat"], plant["lon"]), (cust_lat, cust_lon)],
             )
 
         if best_route is None or candidate.duration_minutes < best_route.duration_minutes:

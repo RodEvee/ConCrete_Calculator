@@ -1,6 +1,7 @@
 from datetime import datetime
 import streamlit as st
 from fpdf import FPDF
+from shape_visualizer import render_route_map, render_shape_preview
 from calculator_engine import (
     ADMIXTURE_CATALOG,
     AGGREGATE_CATALOG,
@@ -425,6 +426,16 @@ with tab_delivery:
                 )
 
             st.caption(ROUTING_DISCLAIMER)
+            st.plotly_chart(
+                render_route_map(route),
+                use_container_width=True,
+                config={"displayModeBar": False, "scrollZoom": True},
+            )
+            st.link_button(
+                "🗺️ Open Route in Google Maps",
+                url=route.google_maps_url,
+                use_container_width=True,
+            )
 
 
 # ==============================================================================
