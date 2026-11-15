@@ -1,7 +1,6 @@
 from datetime import datetime
 import streamlit as st
 from fpdf import FPDF
-from shape_visualizer import render_route_map, render_shape_preview
 from calculator_engine import (
     ADMIXTURE_CATALOG,
     AGGREGATE_CATALOG,
@@ -13,7 +12,7 @@ from calculator_engine import (
     recommend_slump,
 )
 from routing_engine import ROUTING_DISCLAIMER, RouteEstimate, find_nearest_plant
-from shape_visualizer import render_shape_preview
+from shape_visualizer import render_route_map, render_shape_preview
 
 st.set_page_config(
     page_title="Concrete Order & Dispatch Planner",
@@ -317,7 +316,6 @@ with tab_shape:
             label_visibility="collapsed",
         )
 
-        # Mobile-friendly Zoom Bar
         z1, z2, z3, z4 = st.columns([1, 1, 1.2, 1.2])
         if z1.button("➖ Out", use_container_width=True, key="zoom_out"):
             st.session_state.preview_zoom = max(0.5, round(st.session_state.preview_zoom - 0.25, 2))
@@ -390,7 +388,7 @@ with tab_list:
 
 
 # ==============================================================================
-# TAB 3: CUSTOMER INFO & NEAREST BATCH PLANT ROUTING
+# TAB 3: CUSTOMER INFO, NEAREST PLANT ROUTING & INTERACTIVE ROUTE MAP
 # ==============================================================================
 with tab_delivery:
     st.subheader("Jobsite & Customer Details")
@@ -426,6 +424,7 @@ with tab_delivery:
                 )
 
             st.caption(ROUTING_DISCLAIMER)
+
             st.plotly_chart(
                 render_route_map(route),
                 use_container_width=True,
@@ -461,7 +460,6 @@ with tab_quote:
     upcharge_label = f"+${agg_upcharge:,.2f}/yd³" if agg_upcharge > 0 else "Included"
     st.caption(f"*{agg_desc}* ({upcharge_label})")
 
-    # Thin-section + #57 big rock tip
     has_thin_slab = any(
         s.shape in ("Rectangular Slab / Footing", "Circular Slab") and 0 < s.thickness_in < 3.5
         for s in st.session_state.sections
@@ -472,7 +470,6 @@ with tab_quote:
             "usually screeds and finishes easier than #57 Big Rock on thin pours."
         )
 
-    # Automatic Suggested Slump
     rec_idx, rec_label, rec_reason = recommend_slump(st.session_state.sections, selected_aggregate)
     st.success(f"🎯 **Suggested Slump: {rec_label}** — {rec_reason}")
 
@@ -504,7 +501,6 @@ with tab_quote:
     waste_preset = st.selectbox("Jobsite Waste Allowance", options=list(waste_rates.keys()), index=1)
     waste_pct = waste_rates[waste_preset]
 
-    # Supplier Truck & Short-Load Rules (Collapsed on mobile)
     with st.expander("⚙️ Plant Truck & Short-Load Settings"):
         t1, t2 = st.columns(2)
         truck_capacity = t1.number_input("Truck Capacity (yd³)", min_value=5.0, max_value=12.0, value=9.5, step=0.5)
@@ -540,7 +536,6 @@ with tab_quote:
         row2_a.metric("Mixer Trucks", f"{summary.trucks_required}")
         row2_b.metric("Rate / yd³", f"${summary.effective_yard_rate:,.2f}")
 
-        # Full-truck buffer nudge
         remainder_on_truck = summary.recommended_order_yards % truck_capacity
         if 0 < (truck_capacity - remainder_on_truck) <= 0.5 and summary.recommended_order_yards > short_load_threshold:
             st.info(

@@ -71,7 +71,7 @@ class RouteEstimate:
     distance_miles: float
     duration_minutes: int
     is_live_road_route: bool
-    route_coords: List[Tuple[float, float]] = field(default_factory=list)  # (lat, lon) pairs
+    route_coords: List[Tuple[float, float]] = field(default_factory=list)
 
     @property
     def google_maps_url(self) -> str:
@@ -120,7 +120,6 @@ def _query_osrm_drive(
                 route = data["routes"][0]
                 miles = route["distance"] / 1609.344
                 minutes = max(1, round(route["duration"] / 60.0))
-                # GeoJSON returns [lon, lat]; flip to (lat, lon) for mapping
                 raw_coords = route.get("geometry", {}).get("coordinates", [])
                 lat_lon_path = [(lat, lon) for lon, lat in raw_coords]
                 return round(miles, 1), minutes, lat_lon_path
